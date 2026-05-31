@@ -1,0 +1,49 @@
+{
+  "name": "docsense",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "worker": "nodemon --exec ts-node src/workers/ingestion.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KawanjotSingh27/docsense.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/KawanjotSingh27/docsense/issues"
+  },
+  "homepage": "https://github.com/KawanjotSingh27/docsense#readme",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "bullmq": "^5.77.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "ioredis": "^5.11.0",
+    "jsonwebtoken": "^9.0.3",
+    "minio": "^8.0.7",
+    "multer": "^2.1.1",
+    "pdfjs-dist": "^6.0.227",
+    "pg": "^8.21.0",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.20.0",
+    "@types/uuid": "^10.0.0",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
