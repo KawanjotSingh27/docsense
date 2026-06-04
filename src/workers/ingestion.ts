@@ -49,51 +49,68 @@ async function getEmbedding(text: string): Promise<number[]> {
 
 async function processDocument(job: Job) {
   const { documentId, tenantId, storagePath } = job.data
+  
+  try{
+    await pool.query(
+      `UPDATE documents SET status = 'processing' WHERE id = $1`,
+      [documentId]
+    )
 
-  await pool.query(
-    `UPDATE documents SET status = 'processing' WHERE id = $1`,
-    [documentId]
-  )
+    const stream = await minioClient.getObject(BUCKET_NAME, storagePath)
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) {
+      chunks.push(chunk)
+    }
+    const fileBuffer = Buffer.concat(chunks)
+    const text = await extractText(new Uint8Array(fileBuffer))
 
-  const stream = await minioClient.getObject(BUCKET_NAME, storagePath)
-  const chunks: Buffer[] = []
-  for await (const chunk of stream) {
-    chunks.push(chunk)
-  }
-  const fileBuffer = Buffer.concat(chunks)
-  const text = await extractText(new Uint8Array(fileBuffer))
+    if (!text.trim()) {
+      await pool.query(
+        `UPDATE documents SET status = 'failed' WHERE id = $1`,
+        [documentId]
+      )
+      return
+    }
 
-  if (!text.trim()) {
+    const textChunks = chunkText(text)
+
+    for (const chunk of textChunks) {
+      const embedding = await getEmbedding(chunk)
+
+      await pool.query(
+        `INSERT INTO chunks (document_id, tenant_id, content, embedding)
+        VALUES ($1, $2, $3, $4)`,
+        [documentId, tenantId, chunk, JSON.stringify(embedding)]
+      )
+    }
+
+    await pool.query(
+      `UPDATE documents SET status = 'completed' WHERE id = $1`,
+      [documentId]
+    )
+
+    console.log(`Document ${documentId} processed — ${textChunks.length} chunks`)
+  }catch (err) {
+    await pool.query(
+      `DELETE FROM chunks WHERE document_id = $1`,
+      [documentId]
+    )
+
     await pool.query(
       `UPDATE documents SET status = 'failed' WHERE id = $1`,
       [documentId]
     )
-    return
+
+    throw err
   }
-
-  const textChunks = chunkText(text)
-
-  for (const chunk of textChunks) {
-    const embedding = await getEmbedding(chunk)
-
-    await pool.query(
-      `INSERT INTO chunks (document_id, tenant_id, content, embedding)
-       VALUES ($1, $2, $3, $4)`,
-      [documentId, tenantId, chunk, JSON.stringify(embedding)]
-    )
-  }
-
-  await pool.query(
-    `UPDATE documents SET status = 'completed' WHERE id = $1`,
-    [documentId]
-  )
-
-  console.log(`Document ${documentId} processed — ${textChunks.length} chunks`)
 }
 
 const worker = new Worker('document-ingestion', processDocument, {
-  connection: { host: 'localhost', port: 6379 }
+  connection: { host: 'localhost', port: 6379 },
 })
 
 worker.on('completed', job => console.log(`Job ${job.id} completed`))
 worker.on('failed', (job, err) => console.error(`Job ${job?.id} failed:`, err))
+worker.on('error', err => {
+  console.error('Worker error:', err.message)
+})

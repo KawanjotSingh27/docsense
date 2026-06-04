@@ -12,6 +12,24 @@ const ingestionQueue = new Queue('document-ingestion', {
   connection: { host: 'localhost', port: 6379 }
 })
 
+router.get('/:documentId/status', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const { tenantId } = req.user!
+  const { documentId } = req.params
+
+  const result = await pool.query(
+    `SELECT id, filename, status, created_at FROM documents 
+     WHERE id = $1 AND tenant_id = $2`,
+    [documentId, tenantId]
+  )
+
+  if (result.rows.length === 0) {
+    res.status(404).json({ error: 'Document not found' })
+    return
+  }
+
+  res.json(result.rows[0])
+})
+
 router.post('/upload', authMiddleware, upload.single('file'), async (req: AuthRequest, res: Response) => {
   const file = req.file
   const { tenantId, userId } = req.user!
@@ -44,6 +62,12 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req: AuthRe
       documentId,
       tenantId,
       storagePath
+    }, {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 5000
+      }
     })
 
     res.status(201).json({ documentId, status: 'pending' })
