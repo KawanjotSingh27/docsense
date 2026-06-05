@@ -1,14 +1,14 @@
 import { Router, Response } from 'express'
 import multer from 'multer'
-import { v4 as uuidv4 } from 'uuid'
 import { AuthRequest, authMiddleware } from '../middleware/auth'
 import { pool } from '../db'
 import { minioClient, BUCKET_NAME } from '../storage'
 import { Queue } from 'bullmq'
+import { randomUUID } from 'crypto'
 
 const router = Router()
 const upload = multer({ storage: multer.memoryStorage() })
-const ingestionQueue = new Queue('document-ingestion', {
+export const ingestionQueue = new Queue('document-ingestion', {
   connection: { host: 'localhost', port: 6379 }
 })
 
@@ -45,7 +45,7 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req: AuthRe
   }
 
   try {
-    const documentId = uuidv4()
+    const documentId = randomUUID()
     const storagePath = `${tenantId}/${documentId}/${file.originalname}`
 
     await minioClient.putObject(BUCKET_NAME, storagePath, file.buffer, file.size, {
