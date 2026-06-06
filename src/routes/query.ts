@@ -105,7 +105,7 @@ Question: ${question}`
   const ollamaResponse = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama3.2:3b', prompt, stream: true })
+    body: JSON.stringify({ model: 'llama3.2:3b', prompt, stream: true, keep_alive: '10m' })
   })
 
   if (!ollamaResponse.body) {
