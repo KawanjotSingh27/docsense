@@ -38,9 +38,14 @@ export async function initDB() {
       document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
       tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
+      content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
       embedding vector(768),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
+  `)
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING GIN (content_tsv)
   `)
 
   console.log('Database initialised')
