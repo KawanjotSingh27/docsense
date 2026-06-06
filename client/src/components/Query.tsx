@@ -2,10 +2,11 @@ import { useState } from 'react'
 
 interface Props {
   token: string
+  documentIds: string[]
   onBack: () => void
 }
 
-export default function Query({ token, onBack }: Props) {
+export default function Query({ token, documentIds, onBack }: Props) {
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState('')
   const [loading, setLoading] = useState(false)
@@ -22,7 +23,7 @@ export default function Query({ token, onBack }: Props) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({ question, documentIds })
       })
 
       const reader = response.body!.getReader()

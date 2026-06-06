@@ -52,12 +52,14 @@ cd client && npm run dev
 
 ## API
 
+```
 POST /auth/register        — create account and organisation
 POST /auth/login           — login
 POST /documents/upload     — upload a PDF (multipart/form-data)
 GET  /documents            — list your documents
 GET  /documents/:id/status — check processing status
 POST /query                — ask a question, streams back via SSE
+```
 
 ## Tests
 

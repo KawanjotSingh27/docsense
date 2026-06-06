@@ -16,8 +16,11 @@ async function getEmbedding(text: string): Promise<number[]> {
 }
 
 router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
-  const { question } = req.body
+  console.log('Query request:', req.body)
+  const { question, documentIds } = req.body
   const { tenantId } = req.user!
+
+  const hasFilter = Array.isArray(documentIds) && documentIds.length > 0
 
   if (!question) {
     res.status(400).json({ error: 'No question provided' })
@@ -28,11 +31,14 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 
   const result = await pool.query(
     `SELECT content
-     FROM chunks
-     WHERE tenant_id = $1
-     ORDER BY embedding <=> $2
-     LIMIT 5`,
-    [tenantId, JSON.stringify(questionEmbedding)]
+    FROM chunks
+    WHERE tenant_id = $1
+    ${hasFilter ? 'AND document_id = ANY($3)' : ''}
+    ORDER BY embedding <=> $2
+    LIMIT 5`,
+    hasFilter
+      ? [tenantId, JSON.stringify(questionEmbedding), documentIds]
+      : [tenantId, JSON.stringify(questionEmbedding)]
   )
 
   const chunks = result.rows.map(r => r.content)
