@@ -32,12 +32,13 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 
   const questionEmbedding = await getEmbedding(question)
 
-  const vectorResults = await pool.query(
-    `SELECT id, content
-     FROM chunks
-     WHERE tenant_id = $1
-     ${hasFilter ? 'AND document_id = ANY($3)' : ''}
-     ORDER BY embedding <=> $2
+    const vectorResults = await pool.query(
+    `SELECT c.id, c.content, d.filename
+     FROM chunks c
+     JOIN documents d ON c.document_id = d.id
+     WHERE c.tenant_id = $1
+     ${hasFilter ? 'AND c.document_id = ANY($3)' : ''}
+     ORDER BY c.embedding <=> $2
      LIMIT 10`,
     hasFilter
       ? [tenantId, JSON.stringify(questionEmbedding), documentIds]
@@ -45,23 +46,25 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   )
 
   const keywordResults = await pool.query(
-    `SELECT id, content
-     FROM chunks
-     WHERE tenant_id = $1
-     ${hasFilter ? 'AND document_id = ANY($3)' : ''}
-     AND content_tsv @@ plainto_tsquery('english', $2)
-     ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $2)) DESC
+    `SELECT c.id, c.content, d.filename
+     FROM chunks c
+     JOIN documents d ON c.document_id = d.id
+     WHERE c.tenant_id = $1
+     ${hasFilter ? 'AND c.document_id = ANY($3)' : ''}
+     AND c.content_tsv @@ plainto_tsquery('english', $2)
+     ORDER BY ts_rank(c.content_tsv, plainto_tsquery('english', $2)) DESC
      LIMIT 10`,
     hasFilter
       ? [tenantId, question, documentIds]
       : [tenantId, question]
   )
 
-  const scores = new Map<string, { content: string; score: number }>()
+  const scores = new Map<string, { content: string; filename: string; score: number }>()
 
   vectorResults.rows.forEach((row, index) => {
     scores.set(row.id, {
       content: row.content,
+      filename: row.filename,
       score: rrfScore([index + 1])
     })
   })
@@ -73,6 +76,7 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     } else {
       scores.set(row.id, {
         content: row.content,
+        filename: row.filename,
         score: rrfScore([index + 1])
       })
     }
@@ -81,20 +85,22 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   const topChunks = Array.from(scores.values())
     .sort((a, b) => b.score - a.score)
     .slice(0, 5)
-    .map(c => c.content)
 
   if (topChunks.length === 0) {
     res.status(404).json({ error: 'No documents found for this tenant' })
     return
   }
 
-  const context = topChunks.join('\n\n---\n\n')
+  const contextLines = topChunks
+    .map((chunk, i) => `[${i + 1}] ${chunk.filename}: "${chunk.content}"`)
+    .join('\n\n')
 
   const prompt = `You are a helpful assistant. Answer the user's question using ONLY the context provided below.
 If the answer is not in the context, say "I couldn't find that in your documents."
+After your answer, on a new line write exactly: SOURCES: followed by the numbers of the sources you used, comma separated. Example: SOURCES: 1,3
 
 Context:
-${context}
+${contextLines}
 
 Question: ${question}`
 
@@ -105,7 +111,8 @@ Question: ${question}`
   const ollamaResponse = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama3.2:3b', prompt, stream: true, keep_alive: '10m' })
+    body: JSON.stringify({ model: 'llama3.2:3b', prompt, stream: true, keep_alive: '10m' }),
+    signal: AbortSignal.timeout(300000)
   })
 
   if (!ollamaResponse.body) {
@@ -115,6 +122,9 @@ Question: ${question}`
 
   const reader = ollamaResponse.body.getReader()
   const decoder = new TextDecoder()
+
+  let buffer = ''
+  let answerDone = false
 
   while (true) {
     const { done, value } = await reader.read()
@@ -127,14 +137,41 @@ Question: ${question}`
       try {
         const parsed = JSON.parse(line)
         if (parsed.response) {
-          res.write(`data: ${JSON.stringify({ token: parsed.response })}\n\n`)
+          buffer += parsed.response
+
+          if (buffer.includes('SOURCES:')) {
+            const [answerPart, sourcesPart] = buffer.split('SOURCES:')
+
+            if (!answerDone) {
+              answerDone = true
+              res.write(`data: ${JSON.stringify({ replace: answerPart.trimEnd() })}\n\n`)
+            }
+
+            const sourcesContent = sourcesPart.trim()
+            if (sourcesContent) {
+              const indices = sourcesContent
+                .split(',')
+                .map(s => parseInt(s.trim()) - 1)
+                .filter(i => i >= 0 && i < topChunks.length)
+
+              const citations = indices.map(i => ({
+                filename: topChunks[i].filename,
+                preview: topChunks[i].content.slice(0, 150) + '...'
+              }))
+
+              res.write(`data: ${JSON.stringify({ citations })}\n\n`)
+            }
+          } else if (!answerDone) {
+            res.write(`data: ${JSON.stringify({ token: parsed.response })}\n\n`)
+          }
         }
+
         if (parsed.done) {
           res.write('data: [DONE]\n\n')
           res.end()
         }
       } catch {
-        //pass
+        // pass
       }
     }
   }
